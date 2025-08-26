@@ -78,6 +78,13 @@
         fmov  \hi, x10
 .endm
 
+.macro udiv_by_80 src, dst
+        mov   \dst, #-0x3333333333333334 // =-3689348814741910324
+        movk  \dst, #0xcccd
+        umulh \dst, \src, \dst
+        lsr   \dst, \dst, #6
+.endm
+
 _aes_hw_slothy_xts_decrypt:
 aes_hw_slothy_xts_decrypt:
         // AARCH64_VALID_CALL_TARGET
@@ -93,7 +100,6 @@ aes_hw_slothy_xts_decrypt:
 Lxts_dec_big_size:  // decrypt input size >= 16 bytes
         and  x21, x2, #0xf    // store the tail value of length%16
         and  x2, x2, #-16    // len &= 0x1..110000, now divisible by 16
-        // subs x2, x2, #16
 
         // Firstly, encrypt the iv with key2, as the first iv of XEX.
         ldr  w6, [x4,#240]
@@ -143,8 +149,7 @@ Lxts_dec:
 
 Lxts_dec_begin:
 
-        mov x8, #0x50
-        udiv x8, x2, x8 // Number of 5x-unrolled iterations
+        udiv_by_80 x2, x8 // Number of 5x-unrolled iterations
 
         cmp x2, #0x20
         b.lo Lxts_dec_tail1x   // when input = 1 with another block and a tail

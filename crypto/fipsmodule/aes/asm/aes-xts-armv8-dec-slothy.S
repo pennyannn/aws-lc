@@ -78,6 +78,13 @@
         fmov  \hi, x10
 .endm
 
+.macro udiv_by_80 src, dst
+        mov   \dst, #-0x3333333333333334 // =-3689348814741910324
+        movk  \dst, #0xcccd
+        umulh \dst, \src, \dst
+        lsr   \dst, \dst, #6
+.endm
+
 _aes_hw_slothy_xts_decrypt:
 aes_hw_slothy_xts_decrypt:
         // AARCH64_VALID_CALL_TARGET
@@ -93,7 +100,6 @@ aes_hw_slothy_xts_decrypt:
 Lxts_dec_big_size:  // decrypt input size >= 16 bytes
         and  x21, x2, #0xf    // store the tail value of length%16
         and  x2, x2, #-16    // len &= 0x1..110000, now divisible by 16
-        // subs x2, x2, #16
 
         // Firstly, encrypt the iv with key2, as the first iv of XEX.
         ldr  w6, [x4,#240]
@@ -137,27 +143,30 @@ Loop_iv_enc:
 Lxts_dec:
         tst x21,#0xf
         b.eq Lxts_dec_begin
-        subs x2,x2,#32
-        cmp x2, #0x0
+        subs x2,x2,#16
+        cmp x2, #16
         b.lt Lxts_dec_done   // There is one block and a tail, go directy to cipher-stealing
 
 Lxts_dec_begin:
-        cmp x2, #0x10
+
+        udiv_by_80 x2, x8 // Number of 5x-unrolled iterations
+
+        cmp x2, #0x20
         b.lo Lxts_dec_tail1x   // when input = 1 with another block and a tail
 
-        cmp  x2,#0x20         // bias
+        cmp  x2,#0x30         // bias
         b.lo  Lxts_dec_tail2x    // when input size  = 2 with another block and a tail
 
         // The iv for third block
         tweak d9,v9.d[1]
 
-        cmp  x2,#0x30
+        cmp  x2,#0x40
         b.lo  Lxts_dec_tail3x // when input size  = 3 with another block and a tail
 
         // The iv for fourth block
         tweak d10,v10.d[1]
 
-        cmp x2,#0x40
+        cmp x2,#0x50
         b.lo  Lxts_dec_tail4x // when input size  = 4 with another block and a tail
 
         // The iv for fifth block
@@ -288,8 +297,9 @@ Loop5x_xts_dec:
         stp q24, q25, [x1, #-0x30]
         str  q26, [x1, #-0x10]
 
-        subs x2,x2,#0x50   // @slothy:core
-        b.hs  Loop5x_xts_dec
+        subs x2,x2,#0x50
+        subs x8,x8,#1
+        cbnz x8, Loop5x_xts_dec
 
 Loop5x_dec_after:
         cmp  x2,#0x40
